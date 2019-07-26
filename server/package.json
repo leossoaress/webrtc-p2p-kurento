@@ -1,0 +1,15 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "nodemon": "^1.19.1",
+    "websocket": "^1.0.29",
+    "ws": "^7.1.1"
+  }
+}
