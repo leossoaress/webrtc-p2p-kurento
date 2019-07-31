@@ -1,4 +1,5 @@
-import React, {useEffect} from 'react';
+import React, {useState, useEffect} from 'react';
+
 import {Connection} from './services/api';
 import {peerConnectionConfig, constraints} from './configs/peer2peer';
 
@@ -10,26 +11,152 @@ const App = () => {
   let peerConnection = null;
   let uuid = null;
 
+  let [username, setUsername] = useState('');
+  let [peer, setPeer] = useState('');
+  let [state, setState] = useState('off');
+
   useEffect(() => {
     init();
   });
 
-  const init = () => {
-    uuid = createUUID();
+  const handlerUsername = (event) => {
+    setUsername(event.target.value);
+  }
 
-    localVideo = document.getElementById('local_video');
-    remoteVideo = document.getElementById('remote_video');
+  const handlePeer = (event) => {
+    setPeer(event.target.value);
+  }
 
-    Connection.onmessage = gotMessageFromServer;
+  const handleUsernameSubmit = (event) => {
+    event.preventDefault();
+    let message = {
+      id : 'register',
+		  name : username
+    }
+    sendMessage(message);
 
     if(navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia(constraints).then(getUserMediaSucess);
     }
   }
 
+  const handlePeerSubmit = (event) => {
+    event.preventDefault();
+    let message = {
+      id : 'call',
+      from: username,
+		  to : peer
+    }
+    sendMessage(message);
+  }
+
+  const sendMessage = (message) => {
+    let msg = JSON.stringify(message);
+    console.log('Sending message: ' + msg);
+    Connection.send(msg);
+  }
+
+  const init = () => {
+    localVideo = document.getElementById('local_video');
+    remoteVideo = document.getElementById('remote_video');
+    Connection.onmessage = handleMessageFromServer;
+  }
+
+  const handleMessageFromServer = (message) => {
+
+    let msg = JSON.parse(message.data);
+    console.log(msg);
+
+    switch(msg.id) {
+
+      case 'response_register':
+        registerResponse(msg);
+        break;
+      
+      case 'response_call':
+        responseCall();
+        break;
+
+      case 'incoming_call':
+        incomingCall();
+        break;
+      
+      case 'ice': 
+        addIceCandidate();
+        break;
+
+      case 'sdp': 
+        addSdp();
+        break;
+
+      default: 
+        break;
+
+    }
+
+  }
+
+  const registerResponse = (message) => {
+    if(message.text === 'accepted') {
+      setState('ready');
+    }
+  }
+
+  const responseCall = (message) => {
+  }
+
+  const incomingCall = (message) => {
+    console.log('Receiving a call');
+    peer = message.from;
+    incomingStart();
+  }
+
+  const addIceCandidate = (message) => {
+    peerConnection.addIceCandidate(new RTCIceCandidate(message.ice));
+  }
+
+  const addSdp = (message) => {
+    peerConnection.setRemoteDescription(new RTCSessionDescription(message.sdp)).then(() => {
+      if(message.sdp.type === 'offer') {
+        peerConnection.createAnswer().then(createSDP);
+      }
+    });
+  }
+
   const getUserMediaSucess = (stream) => {
     localStream = stream;
     localVideo.srcObject = stream;
+  }
+
+  const startCall = () => {
+    peerConnection = new RTCPeerConnection(peerConnectionConfig);
+    peerConnection.onicecandidate = gotIceCandidate;
+    peerConnection.ontrack = getRemoteStream;
+    peerConnection.addStream(localStream);
+    peerConnection.createOffer().then(createSDP);
+  }
+
+  const gotIceCandidate = (event) => {
+    if(event.candidate != null) {
+      Connection.send(JSON.stringify({id:'ice', to:peer, 'ice': event.candidate}));
+    }
+  }
+
+  const getRemoteStream = (event) => {
+    remoteVideo.srcObject = event.streams[0];
+  }
+
+  const createSDP = (description) => {
+    peerConnection.setLocalDescription(description).then(() => {
+      Connection.send(JSON.stringify({id:'sdp', to:peer, 'sdp': peerConnection.localDescription}));
+    });
+  }
+
+  const incomingStart = () => {
+    peerConnection = new RTCPeerConnection(peerConnectionConfig);
+    peerConnection.onicecandidate = gotIceCandidate;
+    peerConnection.ontrack = getRemoteStream;
+    peerConnection.addStream(localStream);
   }
 
   const start = (isCaller) => {
@@ -43,56 +170,27 @@ const App = () => {
     }
   }
 
-  const gotMessageFromServer = (message) => {
-    if(!peerConnection) start(false);
-
-    let signal = JSON.parse(message.data);
-
-    //Ignore messages from ourself
-    if(signal.uuid === uuid) return;
-
-    if(signal.sdp) {
-      peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp)).then(() => {
-        if(signal.sdp.type === 'offer') {
-          peerConnection.createAnswer().then(createSDP);
-        }
-      });
-    }
-    else if(signal.ice) {
-      peerConnection.addIceCandidate(new RTCIceCandidate(signal.ice));
-    }
-
-  }
-
-  const gotIceCandidate = (event) => {
-    if(event.candidate != null) {
-      Connection.send(JSON.stringify({'ice': event.candidate, 'uuid': uuid}));
-    }
-  }
-
-  const getRemoteStream = (event) => {
-    remoteVideo.srcObject = event.streams[0];
-  }
-
-  const createSDP = (description) => {
-    peerConnection.setLocalDescription(description).then(() => {
-      Connection.send(JSON.stringify({'sdp': peerConnection.localDescription, 'uuid': uuid}));
-    });
-  }
-
-  const createUUID = () => {
-    function s4() {
-      return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
-    }
-  
-    return s4() + s4() + '-' + s4() + '-' + s4() + '-' + s4() + '-' + s4() + s4() + s4();
-  }
-
-
-
   return (
     <div className="App">
+      
       <h1>WebRTC Peer to Peer</h1>
+      
+      <form onSubmit={handleUsernameSubmit}>
+        <label>
+          Nome:
+          <input type="text" name="name" value={username} onChange={handlerUsername}/>
+        </label>
+        <input type="submit" value="Enviar" />
+      </form>
+
+      <form onSubmit={handlePeerSubmit}>
+        <label>
+          Peer:
+          <input type="text" name="name" value={peer} onChange={handlePeer}/>
+        </label>
+        <input type="submit" value="Ligar" />
+      </form>
+
       <video id='local_video' autoPlay muted />
       <video id='remote_video' autoPlay/>
       <input type="button" id="start" onClick={start.bind(true)} value="Start Video"></input>
