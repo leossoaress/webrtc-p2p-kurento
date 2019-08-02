@@ -3,11 +3,8 @@ import {w3cwebsocket} from 'websocket';
 let Connection = null;
 
 let server_url = null;
-let scheme = 'ws';
+let scheme = 'wss';
 
-if (document.location.protocol === "https:") {
-  scheme += "s";
-}
 server_url = scheme + "://127.0.0.1:8181";
 
 console.log(`Connecting to server: ${server_url}`);

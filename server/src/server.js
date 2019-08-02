@@ -1,5 +1,6 @@
 //Imports
 const fs = require('fs');
+const https = require('https');
 const webSocket = require('ws');
 const webSocketServer = webSocket.Server;
 
@@ -10,13 +11,16 @@ let register = new RegisterSystem();
 let unique_id = 0;
 
 //Certificate and key
-/*const server_config = {
-  key: fs.readFileSync('/keys/key.pem'),
-  cert: fs.readFileSync('/keys/cert.pem')
-};*/
+const server_config = {
+  key: fs.readFileSync('keys/key.pem'),
+  cert: fs.readFileSync('keys/cert.pem')
+};
+
+const httpsServer = https.createServer(server_config);
+httpsServer.listen(8181, '0.0.0.0');
 
 //Create a server for handling websockets calls
-const wss = new webSocketServer({port: 8181});
+const wss = new webSocketServer({server: httpsServer});
 
 wss.on('connection', (ws) => {
   
@@ -37,6 +41,14 @@ wss.on('connection', (ws) => {
       
       case 'call':
         Call(msg.from, msg.to);
+        break;
+
+      case 'ice':
+        relay(msg.to, msg);
+        break;
+
+      case 'sdp':
+        relay(msg.to, msg);
         break;
 
       default:
@@ -89,6 +101,17 @@ const Call = (source, target) => {
   }
 
   return targetUser.sendMessage(message);
+}
+
+const relay = (target, message) => {
+  console.log(target);
+  console.log(message);
+
+  if(target) {
+    let targetUser = register.getUserByName(target);
+    targetUser.sendMessage(message);
+  }
+  
 }
 
 console.log('Server running at port 8181');

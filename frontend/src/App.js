@@ -9,7 +9,9 @@ const App = () => {
   let localStream = null;
   let remoteVideo = null;
   let peerConnection = null;
-  let uuid = null;
+  let gumStream = null;
+  let track = null;
+  let arrivesdp = false;
 
   let [username, setUsername] = useState('');
   let [peer, setPeer] = useState('');
@@ -20,10 +22,12 @@ const App = () => {
   });
 
   const handlerUsername = (event) => {
+    event.preventDefault();
     setUsername(event.target.value);
   }
 
   const handlePeer = (event) => {
+    event.preventDefault();
     setPeer(event.target.value);
   }
 
@@ -34,13 +38,9 @@ const App = () => {
 		  name : username
     }
     sendMessage(message);
-
-    if(navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia(constraints).then(getUserMediaSucess);
-    }
   }
 
-  const handlePeerSubmit = (event) => {
+  function handlePeerSubmit(event) {
     event.preventDefault();
     let message = {
       id : 'call',
@@ -48,6 +48,7 @@ const App = () => {
 		  to : peer
     }
     sendMessage(message);
+    startCall(true);
   }
 
   const sendMessage = (message) => {
@@ -60,6 +61,7 @@ const App = () => {
     localVideo = document.getElementById('local_video');
     remoteVideo = document.getElementById('remote_video');
     Connection.onmessage = handleMessageFromServer;
+    peerConnection = new RTCPeerConnection(peerConnectionConfig);
   }
 
   const handleMessageFromServer = (message) => {
@@ -78,15 +80,15 @@ const App = () => {
         break;
 
       case 'incoming_call':
-        incomingCall();
+        incomingCall(msg);
         break;
       
       case 'ice': 
-        addIceCandidate();
+        addIceCandidate(msg);
         break;
 
       case 'sdp': 
-        addSdp();
+        addSdp(msg);
         break;
 
       default: 
@@ -105,69 +107,64 @@ const App = () => {
   const responseCall = (message) => {
   }
 
-  const incomingCall = (message) => {
-    console.log('Receiving a call');
+  function incomingCall(message) {
     peer = message.from;
-    incomingStart();
+    startCall(false);
   }
 
   const addIceCandidate = (message) => {
-    peerConnection.addIceCandidate(new RTCIceCandidate(message.ice));
+    console.log('Recebendo ICE de ' + peer);
+    peerConnection.addIceCandidate(new RTCIceCandidate(message.ice)).catch(errorHandler);;
   }
 
-  const addSdp = (message) => {
+  const addSdp = async (message) => {
+    console.log('Recebendo SDP de ' + message.sdp.type + ' de ' + peer);
     peerConnection.setRemoteDescription(new RTCSessionDescription(message.sdp)).then(() => {
       if(message.sdp.type === 'offer') {
         peerConnection.createAnswer().then(createSDP);
       }
-    });
+    }).catch(errorHandler);;
   }
 
   const getUserMediaSucess = (stream) => {
     localStream = stream;
     localVideo.srcObject = stream;
+    //stream.getTracks().forEach(track => {peerConnection.addTrack(track, stream)});
   }
 
-  const startCall = () => {
-    peerConnection = new RTCPeerConnection(peerConnectionConfig);
-    peerConnection.onicecandidate = gotIceCandidate;
-    peerConnection.ontrack = getRemoteStream;
-    peerConnection.addStream(localStream);
-    peerConnection.createOffer().then(createSDP);
+  function startCall(isCaller) {
+    navigator.mediaDevices.getUserMedia(constraints).then(getUserMediaSucess).then(() => {
+      peerConnection.onicecandidate = gotIceCandidate;
+      peerConnection.ontrack = gotRemoteStream;
+      peerConnection.addStream(localStream);
+
+      if(isCaller) {
+        peerConnection.createOffer().then(createSDP).catch(errorHandler);;
+      }
+    });
   }
 
   const gotIceCandidate = (event) => {
     if(event.candidate != null) {
+      console.log('Enviando ICE para: ' + peer);
       Connection.send(JSON.stringify({id:'ice', to:peer, 'ice': event.candidate}));
     }
   }
 
-  const getRemoteStream = (event) => {
+  const gotRemoteStream = (event) => {
+    console.log('got remote stream');
     remoteVideo.srcObject = event.streams[0];
   }
 
   const createSDP = (description) => {
-    peerConnection.setLocalDescription(description).then(() => {
+    peerConnection.setLocalDescription(description).then(() => {  
+      console.log('Enviando SDP de ' + peerConnection.localDescription.type + ' para ' + peer);
       Connection.send(JSON.stringify({id:'sdp', to:peer, 'sdp': peerConnection.localDescription}));
-    });
+    }).catch(errorHandler);;
   }
 
-  const incomingStart = () => {
-    peerConnection = new RTCPeerConnection(peerConnectionConfig);
-    peerConnection.onicecandidate = gotIceCandidate;
-    peerConnection.ontrack = getRemoteStream;
-    peerConnection.addStream(localStream);
-  }
-
-  const start = (isCaller) => {
-    peerConnection = new RTCPeerConnection(peerConnectionConfig);
-    peerConnection.onicecandidate = gotIceCandidate;
-    peerConnection.ontrack = getRemoteStream;
-    peerConnection.addStream(localStream);
-
-    if(isCaller) {
-      peerConnection.createOffer().then(createSDP);
-    }
+  function errorHandler(error) {
+    console.log(error);
   }
 
   return (
@@ -193,7 +190,6 @@ const App = () => {
 
       <video id='local_video' autoPlay muted />
       <video id='remote_video' autoPlay/>
-      <input type="button" id="start" onClick={start.bind(true)} value="Start Video"></input>
     </div>
   );
 }
